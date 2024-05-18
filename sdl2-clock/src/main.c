@@ -1,43 +1,63 @@
 #include <stdio.h>
+#include <string.h>
 #include <math.h>
 #include <time.h>
 
 #include "SDL2/SDL.h"
 #include "SDL2/SDL_ttf.h"
 
-#define APP_WIDTH 400
-#define APP_HEIGHT 500
+#define DEFAULT_APP_WIDTH 400
+#define DEFAULT_APP_HEIGHT 500
+#define MIN_WIDTH 200
+#define MIN_HEIGHT (MIN_WIDTH + MIN_WIDTH / 5)
+#define MAX_WIDTH 1000
+#define MAX_HEIGHT (MAX_WIDTH + MAX_WIDTH / 5)
+#define DEFAULT_APP_HEIGHT 500
 #define FPS_CAP 60
 #define MINUTES_ANGLE_INCREMENT 360.0f / 60
 #define HOURS_ANGLE_INCREMENT 360.0f / 12
-
 #define DEFAULT_FONT_SIZE 24
+const SDL_Color OFF_COLOR = { 230, 230, 230, 255 };
+const SDL_Color ON_COLOR = { 0x00, 0x00, 0x00, 0xFF };
 
 typedef struct tm timestamp;
+typedef struct {
+	SDL_Window* window;
+	SDL_Renderer* renderer;
+	int width, height;
+	int enableHourMarks;
+	int enableOffMarks;
+} App;
 
-const SDL_Color BLACK = { 0x00, 0x00, 0x00, 0x00 };
+int isInteger(const char* str);
+int secure_sprintf(char* buffer, size_t bufferSize, const char* format, ...);
 
+void parseArgs(int argc, char** argv);
 void initSDL(void);
 void cleanupSDL(void);
+
 float calculateDeltaTime(void);
 void capFrameRate(Uint32 initFrameTime, Uint32 fpsCap);
 float calculateFPS(float deltaTime);
+
+
 void doInput(void);
-void drawText(TTF_Font* font, char* text, int x, int y, int size, SDL_Color color);
 timestamp doTime(float deltaTime);
-void drawClock(TTF_Font* font, timestamp timeInfo);
+
+void drawText(TTF_Font* font, char* text, int x, int y, int size, SDL_Color color);
+void drawClock(TTF_Font* font, timestamp timeInfo, int size);
 void drawFPS(TTF_Font* font, int fps);
 void drawCurrentTime(TTF_Font* font, timestamp tmInfo);
-int secure_sprintf(char* buffer, size_t bufferSize, const char* format, ...);
 
-SDL_Window* window;
-SDL_Renderer* renderer;
+App app;
 
 int main(int argc, char** argv)
 {
 	Uint32 initFrameTime = 0.0f;
 	float deltaTime = 0.0f;
 	float fps = 0.0f;
+
+	parseArgs(argc, argv);
 
 	initSDL();
 	atexit(cleanupSDL);
@@ -54,19 +74,19 @@ int main(int argc, char** argv)
 		initFrameTime = SDL_GetTicks();
 		deltaTime = calculateDeltaTime();
 
-		SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
-		SDL_RenderClear(renderer);
+		SDL_SetRenderDrawColor(app.renderer, 255, 255, 255, 255);
+		SDL_RenderClear(app.renderer);
 
 		doInput();
 
 		timestamp timeInfo = doTime(deltaTime);
 
-		drawClock(digitalFont, timeInfo);
+		drawClock(digitalFont, timeInfo, DEFAULT_FONT_SIZE);
 		drawFPS(digitalFont, fps);
 		drawCurrentTime(digitalFont, timeInfo);
 
 		// Present scene
-		SDL_RenderPresent(renderer);
+		SDL_RenderPresent(app.renderer);
 
 		fps = calculateFPS(deltaTime);
 		capFrameRate(initFrameTime, FPS_CAP);
@@ -76,8 +96,84 @@ int main(int argc, char** argv)
 }
 
 
+int isInteger(const char* str)
+{
+	char* endptr;
+	errno = 0;
+	long val = strtol(str, &endptr, 10);
 
+	if (errno != 0 || *endptr != '\0' || endptr == str)
+		return 0;
 
+	return 1;
+}
+
+void parseArgs(int argc, char** argv)
+{
+	memset(&app, 0, sizeof(App));
+
+	app.width = DEFAULT_APP_WIDTH;
+	app.height = DEFAULT_APP_HEIGHT;
+
+	for (int i = 1; i < argc; i++)
+	{
+		if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0)
+		{
+			//printUsage(argv[0]);
+			return 0;
+		}
+		else if (strcmp(argv[i], "-H") == 0 || strcmp(argv[i], "--hour-marks") == 0)
+		{
+			app.enableHourMarks = 1;
+		}
+		else if (strcmp(argv[i], "-o") == 0 || strcmp(argv[i], "--off-marks") == 0)
+		{
+			app.enableOffMarks = 1;
+		}
+		else if (strcmp(argv[i], "-w") == 0 || strcmp(argv[i], "--width") == 0)
+		{
+			if (i + 1 < argc)
+			{
+				i++;
+				if (isInteger(argv[i]) && argv[i] > MIN_WIDTH && argv[i] < MAX_WIDTH)
+				{
+					app.width = argv[i];
+				}
+				else
+				{
+					fprintf(stderr, "Option %s requires an integer argument between %d and %d\n", argv[i], MIN_WIDTH, MAX_WIDTH);
+					return 1;
+				}
+			}
+			else
+			{
+				fprintf(stderr, "Option %s requires an argument\n", argv[i]);
+				return 1;
+			}
+		}
+		else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--height") == 0)
+		{
+			if (i + 1 < argc)
+			{
+				i++;
+				if (isInteger(argv[i]) && argv[i] > MIN_HEIGHT && argv[i] < MAX_HEIGHT)
+				{
+					app.width = argv[i];
+				}
+				else
+				{
+					fprintf(stderr, "Option %s requires an integer argument between %d and %d\n", argv[i], MIN_HEIGHT, MAX_HEIGHT);
+					return 1;
+				}
+			}
+			else
+			{
+				fprintf(stderr, "Option %s requires an argument\n", argv[i]);
+				return 1;
+			}
+		}
+	}
+}
 
 void initSDL(void)
 {
@@ -93,18 +189,18 @@ void initSDL(void)
 		exit(1);
 	}
 
-	window = SDL_CreateWindow(
+	app.window = SDL_CreateWindow(
 		"SDL2 Clock",
 		SDL_WINDOWPOS_UNDEFINED,
 		SDL_WINDOWPOS_UNDEFINED,
-		APP_WIDTH,
-		APP_HEIGHT,
+		DEFAULT_APP_WIDTH,
+		DEFAULT_APP_HEIGHT,
 		windowFlags
 	);
 
 	SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "linear");
 
-	renderer = SDL_CreateRenderer(window, -1, rendererFlags);
+	app.renderer = SDL_CreateRenderer(app.window, -1, rendererFlags);
 
 	if (TTF_Init())
 	{
@@ -115,9 +211,9 @@ void initSDL(void)
 
 void cleanupSDL(void)
 {
-	SDL_DestroyRenderer(renderer);
+	SDL_DestroyRenderer(app.renderer);
 
-	SDL_DestroyWindow(window);
+	SDL_DestroyWindow(app.window);
 
 	SDL_Quit();
 }
@@ -196,7 +292,7 @@ void drawText(TTF_Font* font, char* text, int x, int y, int size, SDL_Color colo
 	}
 
 	SDL_Surface* surfaceMessage = TTF_RenderText_Solid(font, text, color);
-	SDL_Texture* textureMessage = SDL_CreateTextureFromSurface(renderer, surfaceMessage);
+	SDL_Texture* textureMessage = SDL_CreateTextureFromSurface(app.renderer, surfaceMessage);
 
 	SDL_Rect messageRect;
 	messageRect.x = x;
@@ -204,7 +300,7 @@ void drawText(TTF_Font* font, char* text, int x, int y, int size, SDL_Color colo
 	messageRect.w = surfaceMessage->w;
 	messageRect.h = surfaceMessage->h;
 
-	SDL_RenderCopy(renderer, textureMessage, NULL, &messageRect);
+	SDL_RenderCopy(app.renderer, textureMessage, NULL, &messageRect);
 
 	SDL_FreeSurface(surfaceMessage);
 	SDL_DestroyTexture(textureMessage);
@@ -217,7 +313,7 @@ timestamp doTime(float deltaTime)
 	return *timeInfo;
 }
 
-void drawClock(TTF_Font* font, timestamp timeInfo)
+void drawClock(TTF_Font* font, timestamp timeInfo, int size)
 {
 	float angle, x, y;
 	int hours, minutes, seconds;
@@ -231,53 +327,68 @@ void drawClock(TTF_Font* font, timestamp timeInfo)
 	for (int i = 1; i < 13; i++)
 	{
 		angle = i * HOURS_ANGLE_INCREMENT;
-		x = (APP_WIDTH / 2) - 15 + 175 * sin(angle * M_PI / 180.0);
-		y = APP_HEIGHT / 2 + 175 * -cos(angle * M_PI / 180.0);
+		x = (DEFAULT_APP_WIDTH / 2) - 15 + 175 * sin(angle * M_PI / 180.0);
+		y = DEFAULT_APP_HEIGHT / 2 + 175 * -cos(angle * M_PI / 180.0);
+
+		if (app.enableOffMarks)
+		{
+			drawText(font, "88", x, y, size, OFF_COLOR);
+		}
 
 		if (secure_sprintf(buffer, sizeof(buffer), "%2d", i) < 0)
 			return;
-
-		drawText(font, buffer, x, y, DEFAULT_FONT_SIZE, BLACK);
+		drawText(font, buffer, x, y, size, ON_COLOR);
 	}
 
 	// Draw seconds
 	for (int i = 0; i < 6; i++)
 	{
 		angle = seconds * MINUTES_ANGLE_INCREMENT;
-		x = (APP_WIDTH / 2) - 15 + (i * 150 / 6) * sin(angle * M_PI / 180.0);
-		y = APP_HEIGHT / 2 + (i * 150 / 6) * -cos(angle * M_PI / 180.0);
+		x = (DEFAULT_APP_WIDTH / 2) - 15 + (i * 150 / 6) * sin(angle * M_PI / 180.0);
+		y = DEFAULT_APP_HEIGHT / 2 + (i * 150 / 6) * -cos(angle * M_PI / 180.0);
+
+		if (app.enableOffMarks)
+		{
+			drawText(font, "88", x, y, size, OFF_COLOR);
+		}
 
 		if (secure_sprintf(buffer, sizeof(buffer), "%02d", seconds) < 0)
 			return;
-
-		drawText(font, buffer, x, y, DEFAULT_FONT_SIZE, BLACK);
+		drawText(font, buffer, x, y, size, ON_COLOR);
 	}
 	
 	// Draw minutes
 	for (int i = 1; i < 5; i++)
 	{
 		angle = minutes * MINUTES_ANGLE_INCREMENT;
-		x = (APP_WIDTH / 2) - 15 + (i * 120 / 4) * sin(angle * M_PI / 180.0);
-		y = APP_HEIGHT / 2 + (i * 120 / 4) * -cos(angle * M_PI / 180.0);
+		x = (DEFAULT_APP_WIDTH / 2) - 15 + (i * 120 / 4) * sin(angle * M_PI / 180.0);
+		y = DEFAULT_APP_HEIGHT / 2 + (i * 120 / 4) * -cos(angle * M_PI / 180.0);
+
+		if (app.enableOffMarks)
+		{
+			drawText(font, "88", x, y, size, OFF_COLOR);
+		}
 
 		if (secure_sprintf(buffer, sizeof(buffer), "%02d", minutes) < 0)
 			return;
-
-		drawText(font, buffer, x, y, DEFAULT_FONT_SIZE, BLACK);
+		drawText(font, buffer, x, y, size, ON_COLOR);
 	}
 
 	// Draw hours
 	for (int i = 1; i < 4; i++)
 	{
 		angle = hours * HOURS_ANGLE_INCREMENT;
-		x = (APP_WIDTH / 2) - 15 + (i * 75 / 3) * sin(angle * M_PI / 180.0);
-		y = APP_HEIGHT / 2 + (i * 75 / 3) * -cos(angle * M_PI / 180.0);
+		x = (DEFAULT_APP_WIDTH / 2) - 15 + (i * 75 / 3) * sin(angle * M_PI / 180.0);
+		y = DEFAULT_APP_HEIGHT / 2 + (i * 75 / 3) * -cos(angle * M_PI / 180.0);
+
+		if (app.enableOffMarks)
+		{
+			drawText(font, "88", x, y, size, OFF_COLOR);
+		}
 
 		if (secure_sprintf(buffer, sizeof(buffer), "%02d", hours) < 0)
 			return;
-
-
-		drawText(font, buffer, x, y, DEFAULT_FONT_SIZE, BLACK);
+		drawText(font, buffer, x, y, size, ON_COLOR);
 	}
 }
 
@@ -287,7 +398,7 @@ void drawFPS(TTF_Font* font, int fps)
 	if (secure_sprintf(buffer, sizeof(buffer), "%5d", fps) < 0)
 		return;
 
-	drawText(font, buffer, APP_WIDTH - 60, 10, DEFAULT_FONT_SIZE, BLACK);
+	drawText(font, buffer, DEFAULT_APP_WIDTH - 60, 10, DEFAULT_FONT_SIZE, ON_COLOR);
 }
 
 void drawCurrentTime(TTF_Font* font, timestamp timeInfo)
@@ -301,8 +412,8 @@ void drawCurrentTime(TTF_Font* font, timestamp timeInfo)
 	if (secure_sprintf(timeBuffer, sizeof(timeBuffer), "%02d:%02d:%02d", timeInfo.tm_hour, timeInfo.tm_min, timeInfo.tm_sec) < 0)
 		return;
 
-	drawText(font, dateBuffer, 5, APP_HEIGHT - 25, DEFAULT_FONT_SIZE, BLACK);
-	drawText(font, timeBuffer, APP_WIDTH - 95, APP_HEIGHT - 25, DEFAULT_FONT_SIZE, BLACK);
+	drawText(font, dateBuffer, 5, DEFAULT_APP_HEIGHT - 25, DEFAULT_FONT_SIZE, ON_COLOR);
+	drawText(font, timeBuffer, DEFAULT_APP_WIDTH - 95, DEFAULT_APP_HEIGHT - 25, DEFAULT_FONT_SIZE, ON_COLOR);
 }
 
 int secure_sprintf(char* buffer, size_t bufferSize, const char* format, ...)
